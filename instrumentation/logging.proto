@@ -1,0 +1,83 @@
+/////////////////////////////////////////////////////////////////////////
+//
+// Authors: Mateusz Jurczyk (mjurczyk@google.com)
+//          Gynvael Coldwind (gynvael@google.com)
+//
+// Copyright 2013 Google Inc. All Rights Reserved.
+// 
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// 
+//     http://www.apache.org/licenses/LICENSE-2.0
+// 
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+
+message log_data_st {
+  // Linear address of the accessed memory.
+  required uint64 lin = 1;
+
+  // Memory access length (in bytes). This value can be 1/2/4/8, and
+  // symbolizes the size of a single atomic memory fetch. If a continuous
+  // memory area has been referenced using fetches of the same size, the
+  // "repeated" field will contain the number of repetitions. The following
+  // value:
+  //               len * repeated
+  // makes the total size of the referenced memory area.
+  required uint32 len = 2;
+
+  // How many fetches of consecutive memory addresses starting from "lin"
+  // have been performed one after another. Typically equal to 1.
+  required uint32 repeated = 3;
+
+  enum mem_access_type {
+    MEM_READ = 0;
+    MEM_WRITE = 1;
+    MEM_EXEC = 2;
+    MEM_RW = 3;
+  };
+
+  // Type of memory access. The Read/Write type is reserved for
+  // instructions which read from a memory area and immediately write back
+  // to it (e.g. inc [mem32]).
+  required mem_access_type access_type = 4;
+
+  // Absolute EIP or RIP of the instruction provoking the memory fetch.
+  required uint64 pc = 5;
+
+  // Number of syscalls previously invoked by this thread.
+  required uint32 syscall_count = 6;
+
+  // ID number of the last syscall invoked in the thread.
+  required uint32 syscall_id = 7;
+
+  // Process filename.
+  required bytes image_file_name = 8;
+  // Process ID.
+  required uint32 process_id = 9;
+  // Thread ID.
+  required uint32 thread_id = 10;
+  // Thread creation time.
+  required uint64 create_time = 11;
+
+  message callstack_item {
+    required uint64 relative_pc = 1;
+    required uint64 module_base = 2;
+    required string module_name = 3;
+  }
+
+  // A stack trace limited to a maximum of four entries.
+  //
+  // Note: stack_trace[0].module_base + stack_trace[0].relative_pc should
+  // be equal to the "pc" value.
+  repeated callstack_item stack_trace = 12;
+
+  // Textual representation of the memory-fetching instruction.
+  required string pc_disasm = 13;
+}
+
