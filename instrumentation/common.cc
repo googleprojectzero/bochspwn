@@ -39,7 +39,7 @@ namespace globals {
   bool has_instr_before_execution_handler;
 
 namespace online {
-  std::set<uint64_t> known_callstack_item;
+  std::set<bx_address> known_callstack_item;
 }  // namespace online
 
 }  // namespace globals

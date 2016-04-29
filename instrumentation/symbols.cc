@@ -74,7 +74,7 @@ std::string symbolize(const std::string module, uint32_t offset) {
   }
 
   symbol_info_package sip;
-  uint64_t displacement = 0;
+  DWORD64 displacement = 0;
 
   if (!SymFromAddr(GetCurrentProcess(), module_base + offset, &displacement, &sip.si)) {
     snprintf(buffer, sizeof(buffer), "%s+%x", module.c_str(), offset);

@@ -99,8 +99,8 @@ void bx_instr_exit(unsigned cpu) {
 // repeat-speedups feature is enabled. Always remember to set
 // BX_SUPPORT_REPEAT_SPEEDUPS to 0 in config.h, otherwise kfetch-toolkit might
 // not work correctly.
-void bx_instr_lin_access(unsigned cpu, bx_address lin, bx_address phy,
-                         unsigned len, unsigned rw) {
+
+void bx_instr_lin_access(unsigned cpu, bx_address lin, bx_phy_address phy, unsigned len, unsigned memtype, unsigned rw) {
   BX_CPU_C *pcpu = BX_CPU(cpu);
 
   // Not going to use physical memory address.
