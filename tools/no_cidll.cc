@@ -3,7 +3,7 @@
 // Authors: Mateusz Jurczyk (mjurczyk@google.com)
 //          Gynvael Coldwind (gynvael@google.com)
 //
-// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright 2013-2018 Google LLC
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
 // limitations under the License.
 //
 
+#include <assert.h>
 #include <stdint.h>
 #include <cstdio>
 #include <cstdlib>
@@ -27,13 +28,27 @@
 #include "logging.pb.h"
 
 int main(int argc, char **argv) {
-  if (argc < 3) {
-    fprintf(stderr, "Usage: %s <input file> <output file>\n", argv[0]);
+  if (argc < 4) {
+    fprintf(stderr, "Usage: %s <input file> <modules list> <output file>\n", argv[0]);
     return EXIT_FAILURE;
   }
 
+  std::vector<module_info> modules;
+  if (!LoadModuleList(argv[2], &modules)) {
+    fprintf(stderr, "Unable to load the module list from \"%s\".\n", argv[2]);
+    return EXIT_FAILURE;
+  }
+
+  int cidll_module_idx = -1;
+  for (unsigned int i = 0; i < modules.size(); i++) {
+    if (modules[i].name == "CI.dll") {
+      cidll_module_idx = i;
+    }
+  }
+  assert(cidll_module_idx != -1);
+
   FILE *fi = fopen(argv[1], "rb");
-  FILE *fo = fopen(argv[2], "wb+");
+  FILE *fo = fopen(argv[3], "wb+");
   if (!fi || !fo) {
     fprintf(stderr, "Unable to open input and/or output file\n");
     return EXIT_FAILURE;
@@ -46,7 +61,7 @@ int main(int argc, char **argv) {
 
     bool allowed = true;
     for (int i = 0; i < ld.stack_trace_size(); i++) {
-      if (!strcmp(ld.stack_trace(i).module_name().c_str(), "CI.dll")) {
+      if (ld.stack_trace(i).module_idx() == cidll_module_idx) {
         allowed = false;
         break;
       }
@@ -66,4 +81,3 @@ int main(int argc, char **argv) {
 
   return EXIT_SUCCESS;
 }
-

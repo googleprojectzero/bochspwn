@@ -3,7 +3,7 @@
 // Authors: Mateusz Jurczyk (mjurczyk@google.com)
 //          Gynvael Coldwind (gynvael@google.com)
 //
-// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright 2013-2018 Google LLC
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,32 +20,7 @@
 
 #include "invoke.h"
 
-#include <stdint.h>
-
 #include "common.h"
-
-bool invoke_mode_handler(mode_event_type type, void *arg1, void *arg2) {
-  static const m_event_handler_func *h = NULL;
-
-  if (!h) {
-    kfetch_mode m = globals::config.mode;
-
-    unsigned int i;
-    for (i = 0; kModeEventHandlers[i].mode != BX_MODE_RESERVED; i++) {
-      if (kModeEventHandlers[i].mode == m) {
-        break;
-      }
-    }
-
-    if (kModeEventHandlers[i].mode == BX_MODE_RESERVED) {
-      abort();
-    }
-
-    h = kModeEventHandlers[i].handlers;
-  }
-
-  return h[type](arg1, arg2);
-}
 
 bool invoke_system_handler(os_event_type type, void *arg1, void *arg2) {
   static const s_event_handler_func *h = NULL;

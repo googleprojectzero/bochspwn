@@ -3,7 +3,7 @@
 // Authors: Mateusz Jurczyk (mjurczyk@google.com)
 //          Gynvael Coldwind (gynvael@google.com)
 //
-// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright 2013-2018 Google LLC
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,11 +20,11 @@
 
 #include "os_windows.h"
 
-#ifdef _WIN32
 #include <stdint.h>
 #include <windows.h>
 
 #include "common.h"
+#include "events.h"
 #include "instrument.h"
 #include "logging.pb.h"
 
@@ -56,6 +56,10 @@ uint64_t off_psloadedmodulelist;
 uint32_t off_irql;
 uint32_t off_kdversionblock;
 uint32_t off_64bit_teb;
+uint32_t off_previous_mode;
+uint32_t off_exception_list;
+uint32_t off_next_exception;
+uint32_t off_try_level;
 
 // ------------------------------------------------------------------
 // Public Windows-specific interface.
@@ -100,17 +104,25 @@ bool init(const char *config_path, void *unused) {
                buffer, sizeof(buffer), &off_psloadedmodulelist);
   READ_INI_INT(config_path, globals::config.os_version, "irql",
                buffer, sizeof(buffer), &off_irql);
+  READ_INI_INT(config_path, globals::config.os_version, "previous_mode",
+               buffer, sizeof(buffer), &off_previous_mode);
+  READ_INI_INT(config_path, globals::config.os_version, "exception_list",
+               buffer, sizeof(buffer), &off_exception_list);
+  READ_INI_INT(config_path, globals::config.os_version, "next_exception",
+               buffer, sizeof(buffer), &off_next_exception);
+  READ_INI_INT(config_path, globals::config.os_version, "try_level",
+               buffer, sizeof(buffer), &off_try_level);
 
   // Read configuration specific to guest bitness.
   if (globals::config.bitness == 32) {
     guest_ptr_size = 4;
-    user_space_boundary = 0x7ff00000;
+    user_space_boundary = 0x7ffff000;
 
     READ_INI_INT(config_path, globals::config.os_version, "kdversionblock",
                  buffer, sizeof(buffer), &off_kdversionblock);
   } else {
     guest_ptr_size = 8;
-    user_space_boundary = 0x000007ff00000000LL;
+    user_space_boundary = 0x000007fffffff000LL;
 
     READ_INI_INT(config_path, globals::config.os_version, "64bit_teb",
                  buffer, sizeof(buffer), &off_64bit_teb);
@@ -175,6 +187,7 @@ bool fill_info(BX_CPU_C *pcpu, void *unused) {
 
   if (addr_kpcr < user_space_boundary) {
     return false;
+
   }
 
   // Verify that current IRQL is not APC_MODE, as apparently there are lots
@@ -222,9 +235,10 @@ bool fill_info(BX_CPU_C *pcpu, void *unused) {
   globals::last_ld.set_create_time(create_time);
 
   // Read the stack trace.
+  uint64_t ip = pc;
+  uint64_t bp = pcpu->gen_reg[BX_64BIT_REG_RBP].rrx;
   if (globals::config.bitness == 32) {
-    uint64_t ip = pc;
-    uint64_t bp = pcpu->gen_reg[BX_64BIT_REG_RBP].rrx;
+    int mod_idx = -1;
     module_info *mi = NULL;
 
     for (unsigned int i = 0; i < globals::config.callstack_length &&
@@ -232,22 +246,27 @@ bool fill_info(BX_CPU_C *pcpu, void *unused) {
                              bp >= user_space_boundary; i++) {
       // Optimization: check last module first.
       if (!mi || mi->module_base > ip || mi->module_base + mi->module_size <= ip) {
-        mi = find_module(ip);
-        if (!mi) {
-          mi = update_module_list(pcpu, ip);
+        mod_idx = find_module(ip);
+        if (mod_idx == -1) {
+          mod_idx = update_module_list(pcpu, ip);
+        }
+
+        if (mod_idx != -1) {
+          mi = globals::modules[mod_idx];
+        } else {
+          mi = NULL;
         }
       }
 
       log_data_st::callstack_item *new_item = globals::last_ld.add_stack_trace();
+
+      new_item->set_module_idx(mod_idx);
       if (mi) {
         new_item->set_relative_pc(ip - mi->module_base);
-        new_item->set_module_base(mi->module_base);
-        new_item->set_module_name(mi->module_name);
       } else {
         new_item->set_relative_pc(pc);
-        new_item->set_module_base(0);
-        new_item->set_module_name("unknown");
       }
+      new_item->set_stack_frame(bp);
 
       if (!bp || !read_lin_mem(pcpu, bp + guest_ptr_size, guest_ptr_size, &ip) ||
           !read_lin_mem(pcpu, bp, guest_ptr_size, &bp)) {
@@ -255,20 +274,79 @@ bool fill_info(BX_CPU_C *pcpu, void *unused) {
       }
     }
   } else {
-    module_info *mi = find_module(pc);
-    if (!mi) {
-      mi = update_module_list(pcpu, pc);
+    int mod_idx = find_module(ip);
+    if (mod_idx == -1) {
+      mod_idx = update_module_list(pcpu, ip);
+    }
+
+    module_info *mi;
+    if (mod_idx != -1) {
+      mi = globals::modules[mod_idx];
+    } else {
+      mi = NULL;
     }
 
     log_data_st::callstack_item *new_item = globals::last_ld.add_stack_trace();
+
+    new_item->set_module_idx(mod_idx);
     if (mi) {
-      new_item->set_relative_pc(pc - mi->module_base);
-      new_item->set_module_base(mi->module_base);
-      new_item->set_module_name(mi->module_name);
+      new_item->set_relative_pc(ip - mi->module_base);
     } else {
-      new_item->set_relative_pc(pc);
-      new_item->set_module_base(0);
-      new_item->set_module_name("unknown");
+      new_item->set_relative_pc(ip);
+    }
+    new_item->set_stack_frame(bp);
+  }
+
+  // Read the PreviousMode byte from KTHREAD (ETHREAD).
+  uint8_t previous_mode = 0;
+  if (!read_lin_mem(pcpu, addr_ethread + off_previous_mode, 1, &previous_mode)) {
+    return false;
+  }
+  globals::last_ld.set_previous_mode(previous_mode);
+
+  // Read all TryLevel values residing in the chain of SEH exception handler
+  // records. This only works on 32-bit builds of Windows, as exception handling
+  // is designed completely differently on 64-bit platforms.
+  if (globals::config.bitness == 32) {
+    uint32_t addr_exception_list = 0;
+    if (!read_lin_mem(pcpu, addr_kpcr + off_exception_list, sizeof(uint32_t), &addr_exception_list)) {
+      return false;
+    }
+
+    const int kMaxTryLevels = 16;
+    for (int i = 0, callstack_idx = 0;
+         i < kMaxTryLevels && callstack_idx < globals::last_ld.stack_trace_size();
+         i++) {
+      uint32_t addr_next_exception = 0;
+      if (!read_lin_mem(pcpu, addr_exception_list + off_next_exception,
+                        sizeof(uint32_t), &addr_next_exception)) {
+        break;
+      }
+
+      uint32_t try_level = 0;
+      if (!read_lin_mem(pcpu, addr_exception_list + off_try_level, sizeof(uint32_t), &try_level)) {
+        break;
+      }
+
+      // Find the stack frame corresponding to the SEH record.
+      while (callstack_idx < globals::last_ld.stack_trace_size() &&
+             globals::last_ld.stack_trace(callstack_idx).stack_frame() < addr_exception_list) {
+        callstack_idx++;
+      }
+
+      // Save the TryLevel value, if the right stack frame was found.
+      if (callstack_idx < globals::last_ld.stack_trace_size()) {
+        globals::last_ld.mutable_stack_trace(callstack_idx)->set_try_level(try_level);
+      } else {
+        break;
+      }
+
+      // Detect the end of SEH chain.
+      if (addr_next_exception == 0xFFFFFFFF) {
+        break;
+      }
+
+      addr_exception_list = addr_next_exception;
     }
   }
 
@@ -286,34 +364,34 @@ bool fill_info(BX_CPU_C *pcpu, void *unused) {
 
 // Traverse the PsLoadedModuleList linked list of drivers in search of
 // one that contains the "pc" address.
-module_info *update_module_list(BX_CPU_C *pcpu, bx_address pc) {
+int update_module_list(BX_CPU_C *pcpu, bx_address pc) {
   uint64_t addr_module = 0;
 
   if (globals::config.bitness == 32) {
     uint64_t addr_kpcr = pcpu->get_segment_base(BX_SEG_REG_FS);
     if (addr_kpcr < user_space_boundary) {
-      return NULL;
+      return -1;
     }
 
     uint64_t addr_dbg_block = 0;
     if (!read_lin_mem(pcpu, addr_kpcr + off_kdversionblock, guest_ptr_size,
                       &addr_dbg_block) || addr_dbg_block < user_space_boundary) {
-      return NULL;
+      return -1;
     }
 
     if (!read_lin_mem(pcpu, addr_dbg_block + off_psloadedmodulelist, guest_ptr_size,
                      &addr_module) || addr_module < user_space_boundary) {
-      return NULL;
+      return -1;
     }
   } else {
     uint64_t addr_kpcr = pcpu->get_segment_base(BX_SEG_REG_GS);
     if (addr_kpcr < user_space_boundary) {
-      return NULL;
+      return -1;
     }
 
     if (!read_lin_mem(pcpu, addr_kpcr + off_psloadedmodulelist, guest_ptr_size,
                       &addr_module)) {
-      return NULL;
+      return -1;
     }
   }
 
@@ -325,7 +403,7 @@ module_info *update_module_list(BX_CPU_C *pcpu, bx_address pc) {
     uint32_t imagesize = 0;
     if (!read_lin_mem(pcpu, addr_module + off_baseaddress, guest_ptr_size, &base) ||
         !read_lin_mem(pcpu, addr_module + off_sizeofimage, sizeof(uint32_t), &imagesize)) {
-      return NULL;
+      return -1;
     }
 
     // If "pc" belongs to the executable, read image name and insert a
@@ -336,16 +414,16 @@ module_info *update_module_list(BX_CPU_C *pcpu, bx_address pc) {
 
       if (!read_lin_mem(pcpu, addr_module + off_basedllname + off_us_len,
                         sizeof(uint16_t), &unicode_length)) {
-        return NULL;
+        return -1;
       }
 
       if (!read_lin_mem(pcpu, addr_module + off_basedllname + off_us_buffer,
                         guest_ptr_size, &unicode_buffer)) {
-        return NULL;
+        return -1;
       }
 
       if (unicode_length == 0 || unicode_buffer == 0) {
-        return NULL;
+        return -1;
       }
 
       static uint16_t unicode_name[130] = {0};
@@ -355,7 +433,7 @@ module_info *update_module_list(BX_CPU_C *pcpu, bx_address pc) {
       }
 
       if (!read_lin_mem(pcpu, unicode_buffer, to_fetch, &unicode_name)) {
-        return NULL;
+        return -1;
       }
 
       size_t half_fetch = to_fetch / 2;  // to_fetch in unicode characters.
@@ -367,31 +445,22 @@ module_info *update_module_list(BX_CPU_C *pcpu, bx_address pc) {
 
       // Add to cache for future reference.
       module_info *mi = new module_info(base, imagesize, module_name);
+      events::event_new_module(mi);
 
-      // ntoskrnl and win32k are the two most frequently seen drivers, so
-      // put them into a prioritized list.
-      if (!strcmp(module_name, "ntoskrnl.exe") || !strcmp(module_name, "win32k.sys")) {
-        globals::special_modules.push_back(mi);
-      } else {
-        globals::modules.push_back(mi);
-      }
-
-      return mi;
+      return globals::modules.size() - 1;
     }
 
-    if (!read_lin_mem(pcpu, addr_module + off_loadorder_flink, guest_ptr_size,
-        &addr_module) || addr_module < user_space_boundary ||
+    if (!read_lin_mem(pcpu, addr_module + off_loadorder_flink, guest_ptr_size, &addr_module) ||
+        addr_module < user_space_boundary ||
         addr_module - off_loadorder_flink == addr_module_start) {
-      return NULL;
+      return -1;
     }
 
     addr_module -= off_loadorder_flink;
   }
 
-  return NULL;
+  return -1;
 }
 
 }  // namespace windows
-
-#endif  // _WIN32
 

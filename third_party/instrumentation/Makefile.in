@@ -1,6 +1,6 @@
 # Copyright (C) 2001  The Bochs Project
 #
-# Modified by Google Inc.
+# Modified by Google LLC
 #   Mateusz Jurczyk (mjurczyk@google.com)
 #   and Gynvael Coldwind (gynvael@google.com)
 #
@@ -19,8 +19,8 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
 #
 # NOTE: This is a standard Bochs instrument/stubs/Makefile.in. We
-#       added a couple .o files so it works OK with kfetch-toolkit
-#       (kfetch-toolkit authors)
+#       added a couple .o files so it works OK with Bochspwn.
+#                                             -- Bochspwn authors
 
 
 @SUFFIX_LINE@
@@ -52,7 +52,7 @@ BX_OBJS = \
   common.o \
   invoke.o \
   logging.pb.o \
-  modes.o \
+  events.o \
   os_linux.o \
   os_windows.o \
   os_freebsd.o \

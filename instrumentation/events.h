@@ -18,30 +18,28 @@
 // limitations under the License.
 //
 
-#ifndef BOCHSPWN_OS_OPENBSD_H_
-#define BOCHSPWN_OS_OPENBSD_H_
+#ifndef BOCHSPWN_EVENTS_H_
+#define BOCHSPWN_EVENTS_H_
 
 #include <cstdint>
 
+#include "bochs.h"
+#include "cpu/cpu.h"
+
 #include "common.h"
 
-#ifndef MAX_PROC_COMM_LEN
-#  define MAX_PROC_COMM_LEN 256
-#endif
+namespace events {
 
-namespace openbsd {
+// New system call was invoked in the guest operating system.
+bool event_new_syscall(BX_CPU_C *, client_id *);
 
-// ------------------------------------------------------------------
-// System events public interface.
-// ------------------------------------------------------------------
-bool init(const char *, void *);
-bool check_kernel_addr(uint64_t *, void *);
-bool check_user_addr(uint64_t *, void *);
-bool fill_cid(BX_CPU_C *, client_id *);
-bool fill_info(BX_CPU_C *, void *);
-bool instr_before_execution(BX_CPU_C *, bxInstruction_c *);
+// A new module was detected in the guest operating system.
+bool event_new_module(module_info *mi);
 
-}  // namespace openbsd
+// A new memory access log should be processed.
+bool event_process_log();
 
-#endif  // BOCHSPWN_OS_OPENBSD_H_
+}  // namespace events
+
+#endif  // BOCHSPWN_EVENT_H_
 

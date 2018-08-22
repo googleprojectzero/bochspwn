@@ -3,7 +3,7 @@
 // Authors: Mateusz Jurczyk (mjurczyk@google.com)
 //          Gynvael Coldwind (gynvael@google.com)
 //
-// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright 2013-2018 Google LLC
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,9 +30,9 @@
 typedef std::map<std::string, FILE*> file_map_t;
 
 void FinishFileMap(file_map_t *m) {
-  for (file_map_t::iterator it = m->begin(); it != m->end(); it++) {
-    fflush(it->second);
-    fclose(it->second);
+  for (const auto& it : *m) {
+    fflush(it.second);
+    fclose(it.second);
   }
 
   m->clear();
@@ -76,17 +76,13 @@ void AddRecordToFile(file_map_t *m, char *file_path, const std::string& protobuf
 }
 
 int main(int argc, char **argv) {
-  static char unique_thread_path[256];
-  char *log_file_path;
-  char *output_dir;
-
   if (argc != 3) {
     fprintf(stderr, "Usage: %s <log file> <output directory>\n", argv[0]);
     return EXIT_FAILURE;
   }
 
-  log_file_path = argv[1];
-  output_dir = argv[2];
+  const char *log_file_path = argv[1];
+  const char *output_dir = argv[2];
 
   FILE *f = fopen(log_file_path, "rb");
   if (!f) {
@@ -97,6 +93,8 @@ int main(int argc, char **argv) {
   file_map_t thread_logs;
   log_data_st ld;
   std::string protobuf;
+  char unique_thread_path[256];
+
   while (LoadNextRecord(f, &protobuf, &ld)) {
     snprintf(unique_thread_path, sizeof(unique_thread_path),
              "%s/%.8x%.8x-%.8x-%.8x.bin",

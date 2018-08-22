@@ -3,7 +3,7 @@
 // Authors: Mateusz Jurczyk (mjurczyk@google.com)
 //          Gynvael Coldwind (gynvael@google.com)
 //
-// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright 2013-2018 Google LLC
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,55 +18,18 @@
 // limitations under the License.
 //
 
-#ifndef KFETCH_TOOLKIT_INVOKE_H_
-#define KFETCH_TOOLKIT_INVOKE_H_
+#ifndef BOCHSPWN_INVOKE_H_
+#define BOCHSPWN_INVOKE_H_
 
 #include "common.h"
-#include "modes.h"
+#include "events.h"
 #include "os_linux.h"
 #include "os_windows.h"
 #include "os_freebsd.h"
 #include "os_openbsd.h"
 
 // ------------------------------------------------------------------
-// kfetch-toolkit mode-related definitions.
-// ------------------------------------------------------------------
-const struct tag_kSupportedModes {
-  const char *name;
-  kfetch_mode mode;
-} kSupportedModes[] = {
-  {"offline", BX_MODE_OFFLINE},
-  {"online_doublefetch", BX_MODE_ONLINE_DOUBLEFETCH},
-  {NULL, BX_MODE_RESERVED}
-};
-
-enum mode_event_type {
-  BX_MODE_EVENT_NEW_SYSCALL = 0,
-  BX_MODE_EVENT_PROCESS_LOG,
-  BX_MODE_EVENT_MAX
-};
-
-typedef bool (*m_event_handler_func)(void *, void *);
-
-const struct tag_kModeEventHandlers {
-  kfetch_mode mode;
-  m_event_handler_func handlers[BX_MODE_EVENT_MAX];
-} kModeEventHandlers[] = {
-  {BX_MODE_OFFLINE,
-   {(m_event_handler_func)modes::offline_new_syscall,
-    (m_event_handler_func)modes::offline_process_log}
-  },
-  {BX_MODE_ONLINE_DOUBLEFETCH,
-   {(m_event_handler_func)modes::online_df_new_syscall,
-    (m_event_handler_func)modes::online_df_process_log}
-  },
-  {BX_MODE_RESERVED, {NULL, NULL}},
-};
-
-bool invoke_mode_handler(mode_event_type type, void *arg1, void *arg2);
-
-// ------------------------------------------------------------------
-// kfetch-toolkit system-related definitions.
+// Bochspwn system-related definitions.
 // ------------------------------------------------------------------
 const char *const kSupportedSystems[] = {
   "windows",
@@ -129,5 +92,5 @@ const struct tag_kSystemEventHandlers {
 
 bool invoke_system_handler(os_event_type type, void *arg1, void *arg2);
 
-#endif  // KFETCH_TOOLKIT_INVOKE_H_
+#endif  // BOCHSPWN_INVOKE_H_
 

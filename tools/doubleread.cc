@@ -3,7 +3,7 @@
 // Authors: Mateusz Jurczyk (mjurczyk@google.com)
 //          Gynvael Coldwind (gynvael@google.com)
 //
-// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright 2013-2018 Google LLC
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -92,7 +92,6 @@ std::map<std::string, FILE*> log_file_handles;
 
 // The routine takes information about a multiple fetch, verifies it
 // against the currently known database of vulnerabilities and prints out
-
 // its details to an adequate log file, if the provided report is unique.
 //
 // Parameters:
@@ -105,7 +104,9 @@ std::map<std::string, FILE*> log_file_handles;
 //  * accesses - a list of memory access descriptors, of size greater or
 //               equal to 2 (otherwise, it wouldn't be a vulnerability).
 //
-void HandleMultipleFetch(const char *output_path, uint64_t address,
+void HandleMultipleFetch(const char *output_path, 
+                         const std::vector<module_info>& modules,
+                         uint64_t address,
                          const std::vector<log_data_st *>& accesses) {
   // Some memory locations are referenced tens or hundreds of times within
   // a single syscall. In order to optimize CPU consumption, we assume that
@@ -124,8 +125,13 @@ void HandleMultipleFetch(const char *output_path, uint64_t address,
     StackTrace local_trace;
 
     for (int j = 0; j < accesses[i]->stack_trace_size(); j++) {
-      local_trace.trace.push_back(accesses[i]->stack_trace(j).module_base() +
-                                  accesses[i]->stack_trace(j).relative_pc());
+      int module_idx = accesses[i]->stack_trace(j).module_idx();
+      if (module_idx == -1) {
+        local_trace.trace.push_back(accesses[i]->stack_trace(j).relative_pc());
+      } else {
+        local_trace.trace.push_back(modules[module_idx].base +
+                                    accesses[i]->stack_trace(j).relative_pc());
+      }
     }
     signature.push_back(local_trace);
   }
@@ -134,7 +140,14 @@ void HandleMultipleFetch(const char *output_path, uint64_t address,
   // stack trace available for the first read.
   if (globals::unique_mult_fetches.find(signature) == globals::unique_mult_fetches.end() &&
       accesses[0]->stack_trace_size() > 0) {
-    const std::string& module_name = accesses[0]->stack_trace(0).module_name();
+    int module_idx = accesses[0]->stack_trace(0).module_idx();
+    std::string module_name;
+
+    if (module_idx == -1) {
+      module_name = "unknown";
+    } else {
+      module_name = modules[module_idx].name;
+    }
 
     // If module was encountered for the first time, attempt to open a
     // corresponding output file.
@@ -177,7 +190,7 @@ void HandleMultipleFetch(const char *output_path, uint64_t address,
       } else {
         fprintf(f, ":\n");
       }
-      fprintf(f, "%s\n", LogDataAsText(*accesses[i]).c_str());
+      fprintf(f, "%s\n", LogDataAsText(*accesses[i], modules).c_str());
 
       i += j;
     }
@@ -189,22 +202,25 @@ void HandleMultipleFetch(const char *output_path, uint64_t address,
 }
 
 int main(int argc, const char **argv) {
-  DIR *dirp;
-  struct dirent *dp;
-  const char *logs_path;
-  const char *output_path;
-
-  if (argc < 3) {
-    fprintf(stderr, "Usage: %s </path/to/input/logs> </path/to/output/logs>\n", argv[0]);
+  if (argc < 4) {
+    fprintf(stderr, "Usage: %s /path/to/memory/logs /path/to/modules/list /path/to/output/logs\n", argv[0]);
     return EXIT_SUCCESS;
   }
 
-  logs_path = argv[1];
-  output_path = argv[2];
+  const char *logs_path = argv[1];
+  const char *modules_list_path = argv[2];
+  const char *output_path = argv[3];
 
-  dirp = opendir(logs_path);
+  DIR *dirp = opendir(logs_path);
   if (!dirp) {
     fprintf(stderr, "Unable to open the \"%s\" directory\n", logs_path);
+    return EXIT_FAILURE;
+  }
+
+  // Load the module list.
+  std::vector<module_info> modules;
+  if (!LoadModuleList(modules_list_path, &modules)) {
+    fprintf(stderr, "Unable to load the module list from \"%s\".\n", modules_list_path);
     return EXIT_FAILURE;
   }
 
@@ -213,10 +229,7 @@ int main(int argc, const char **argv) {
   uint64_t bytes_processed = 0;
 
   // List all files in the specified directory.
-  //
-  // NOTE: The assumption here is that the directory contains log files
-  // already split based on their thread id (using the enclosed "sep"
-  // tool).
+  struct dirent *dp;
   while ((dp = readdir(dirp)) != NULL) {
     static char buffer[MAX_PATH];
 
@@ -235,7 +248,7 @@ int main(int argc, const char **argv) {
     fprintf(stderr, "[%.4u] Loaded file \"%s\" (%" PRIu64 " bytes processed)\n",
             file_count++, dp->d_name, bytes_processed);
 
-    // Read records until the file is over.
+    // Read records until the file is over, or we're out of memory.
     static log_data_st ld;
     while (LoadNextRecord(f, NULL, &ld)) {
       bytes_processed += ld.ByteSize();
@@ -243,98 +256,99 @@ int main(int argc, const char **argv) {
       if (ld.syscall_count() != cur_syscall_count) {
         // We have a new syscall: go through all memory accesses encountered
         // during the last one and print out information about double fetches.
-        for (std::map<uint64_t, std::vector<log_data_st *> >::iterator
-             it = globals::memory_accesses.begin();
-             it != globals::memory_accesses.end(); it++) {
-          if (it->second.size() > 1) {
-            HandleMultipleFetch(output_path, it->first, it->second);
+        for (const auto& it : globals::memory_accesses) {
+          if (it.second.size() > 1) {
+            HandleMultipleFetch(output_path, modules, it.first, it.second);
           }
         }
 
         // Free all old structures for the last syscall and cleanup information
         // about accessed addresses.
-        for (unsigned int i = 0; i < globals::access_structs.size(); i++) {
-          delete globals::access_structs[i];
+        for (auto access_struct : globals::access_structs) {
+          delete access_struct;
         }
+
         globals::access_structs.clear();
         globals::memory_accesses.clear();
 
-        // Remember the currently handled syscall count
+        // Remember the currently handled syscall count.
         cur_syscall_count = ld.syscall_count();
       }
 
-      // If syscall_count is 0, ignore the entry.
-      if (ld.syscall_count() == 0) {
+      // If syscall_count is 0 or the size of the memory access is 1 byte, ignore the entry.
+      if (ld.syscall_count() == 0 || ld.len() < 2) {
         continue;
       }
 
-      if (ld.access_type() == log_data_st::MEM_READ) {
-        // If it's a READ, save information about it.
-        log_data_st *new_ld = new log_data_st;
-        *new_ld = ld;
+      // Catch OOM exceptions and handle them gracefully.
+      try {
+        if (ld.access_type() == log_data_st::MEM_READ) {
+          // If it's a READ, save information about it.
+          log_data_st *new_ld = new log_data_st;
+          *new_ld = ld;
 
-        globals::access_structs.push_back(new_ld);
+          globals::access_structs.push_back(new_ld);
 
-        // For atomic accesses, save only the base access address. For longer ones
-        // (e.g. memcpy-like records), mark each single byte of the region as accessed
-        // for further analysis.
-        if (ld.repeated() == 1) {
-          globals::memory_accesses[ld.lin()].push_back(new_ld);
-        } else {
-          for (uint64_t i = 0; i < ld.len() * ld.repeated(); i++) {
-            globals::memory_accesses[ld.lin() + i].push_back(new_ld);
+          // For atomic accesses, save only the base access address. For longer ones
+          // (e.g. memcpy-like records), mark each single byte of the region as accessed
+          // for further analysis.
+          if (ld.repeated() == 1) {
+            globals::memory_accesses[ld.lin()].push_back(new_ld);
+          } else {
+            for (uint64_t i = 0; i < ld.len() * ld.repeated(); i++) {
+              globals::memory_accesses[ld.lin() + i].push_back(new_ld);
+            }
+          }
+        } else if (ld.access_type() == log_data_st::MEM_WRITE) {
+          // If it's a WRITE, check if it's a part of an inlined
+          // ProbeForWrite() call.
+          if (!globals::access_structs.empty()) {
+            log_data_st *last_ld = globals::access_structs.back();
+
+            if (last_ld->lin() == ld.lin() &&
+                last_ld->pc() >= ld.pc() - 8 && last_ld->pc() < ld.pc() &&
+                last_ld->repeated() == ld.repeated() && last_ld->repeated() == 1 &&
+                last_ld->len() == ld.len() &&
+                last_ld->access_type() == log_data_st::MEM_READ) {
+              // All conditions for a ProbeForWrite() are met, remove the
+              // last READ record.
+              globals::memory_accesses[ld.lin()].pop_back();
+
+              delete last_ld;
+              globals::access_structs.pop_back();
+            }
           }
         }
-      } else if (ld.access_type() == log_data_st::MEM_WRITE) {
-        // If it's a WRITE, check if it's a part of an inlined
-        // ProbeForWrite() call.
-        if (!globals::access_structs.empty()) {
-          log_data_st *last_ld = globals::access_structs.back();
-
-          if (last_ld->lin() == ld.lin() &&
-              last_ld->pc() >= ld.pc() - 8 && last_ld->pc() < ld.pc() &&
-              last_ld->repeated() == ld.repeated() && last_ld->repeated() == 1 &&
-              last_ld->len() == ld.len() &&
-              last_ld->access_type() == log_data_st::MEM_READ) {
-            // All conditions for a ProbeForWrite() are met, remove the
-            // last READ record.
-            globals::memory_accesses[ld.lin()].pop_back();
-
-            delete last_ld;
-            globals::access_structs.pop_back();
-          }
-        }
+      } catch (std::bad_alloc& ba) {
+        // Reset the current syscall count, which will cause the overall state to be reset.
+        cur_syscall_count = (uint32_t)(-1);
       }
     }
 
     fclose(f);
 
     // Go through the list of memory accesses one last time.
-    for (std::map<uint64_t, std::vector<log_data_st *> >::iterator
-         it = globals::memory_accesses.begin();
-         it != globals::memory_accesses.end(); it++) {
-      if (it->second.size() > 1) {
-        HandleMultipleFetch(output_path, it->first, it->second);
+    for (const auto& it : globals::memory_accesses) {
+      if (it.second.size() > 1) {
+        HandleMultipleFetch(output_path, modules, it.first, it.second);
       }
     }
 
     // Free all old structures for the last syscall and cleanup information
     // about accessed addresses.
-    for (unsigned int i = 0; i < globals::access_structs.size(); i++) {
-      delete globals::access_structs[i];
+    for (auto access_struct : globals::access_structs) {
+      delete access_struct;
     }
+
     globals::access_structs.clear();
     globals::memory_accesses.clear();
     cur_syscall_count = (uint32_t)(-1);
   }
 
-  for (std::map<std::string, FILE *>::iterator
-       it = globals::log_file_handles.begin();
-       it != globals::log_file_handles.end(); it++) {
-    fclose(it->second);
+  for (const auto& it : globals::log_file_handles) {
+    fclose(it.second);
   }
   globals::log_file_handles.clear();
 
   return EXIT_SUCCESS;
 }
-

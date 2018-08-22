@@ -3,7 +3,7 @@
 // Authors: Mateusz Jurczyk (mjurczyk@google.com)
 //          Gynvael Coldwind (gynvael@google.com)
 //
-// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright 2013-2018 Google LLC
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,25 +22,32 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 #include "common.h"
 #include "logging.pb.h"
 
 int main(int argc, char **argv) {
-  if (argc < 2) {
-    fprintf(stderr, "Usage: %s <input file>\n", argv[0]);
+  if (argc < 3) {
+    fprintf(stderr, "Usage: %s <input file> <modules list>\n", argv[0]);
+    return EXIT_FAILURE;
+  }
+
+  std::vector<module_info> modules;
+  if (!LoadModuleList(argv[2], &modules)) {
+    fprintf(stderr, "Unable to load the module list from \"%s\".\n", argv[2]);
     return EXIT_FAILURE;
   }
 
   FILE *f = fopen(argv[1], "rb");
   if (!f) {
-    fprintf(stderr, "Unable to open input file \"%s\"\n", argv[1]);
+    fprintf(stderr, "Unable to open input file \"%s\".\n", argv[1]);
     return EXIT_FAILURE;
   }
 
   log_data_st ld;
   while (LoadNextRecord(f, NULL, &ld)) {
-    printf("%s", LogDataAsText(ld).c_str());
+    printf("%s", LogDataAsText(ld, modules).c_str());
   }
 
   if (!feof(f)) {
@@ -50,4 +57,3 @@ int main(int argc, char **argv) {
   fclose(f);
   return EXIT_SUCCESS;
 }
-

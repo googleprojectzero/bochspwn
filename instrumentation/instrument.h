@@ -3,7 +3,7 @@
 // Authors: Mateusz Jurczyk (mjurczyk@google.com)
 //          Gynvael Coldwind (gynvael@google.com)
 //
-// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright 2013-2018 Google LLC
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@
 // limitations under the License.
 //
 
-#ifndef KFETCH_TOOLKIT_INSTRUMENT_H_
-#define KFETCH_TOOLKIT_INSTRUMENT_H_
+#ifndef BOCHSPWN_INSTRUMENT_H_
+#define BOCHSPWN_INSTRUMENT_H_
 
 #include <map>
 #include <vector>
@@ -30,16 +30,13 @@
 #include "common.h"
 #include "logging.pb.h"
 
-// This code is based on GPL code. Make sure the copyrights are resolved
-// before publishing this.
-
 // ------------------------------------------------------------------
 // Implemented instrumentation.
 // ------------------------------------------------------------------
 void bx_instr_initialize(unsigned cpu);
 void bx_instr_exit(unsigned cpu);
 void bx_instr_lin_access(unsigned cpu, bx_address lin, bx_address phy,
-                         unsigned len, unsigned rw);
+                         unsigned len, unsigned memtype, unsigned rw);
 void bx_instr_before_execution(unsigned cpu, bxInstruction_c *i);
 
 #define BX_INSTR_INITIALIZE(cpu_id) \
@@ -48,8 +45,8 @@ void bx_instr_before_execution(unsigned cpu, bxInstruction_c *i);
 #define BX_INSTR_EXIT(cpu_id) \
   bx_instr_exit(cpu_id)
 
-#define BX_INSTR_LIN_ACCESS(cpu_id, lin, phy, len, rw) \
-  bx_instr_lin_access(cpu_id, lin, phy, len, rw)
+#define BX_INSTR_LIN_ACCESS(cpu_id, lin, phy, len, memtype, rw) \
+  bx_instr_lin_access(cpu_id, lin, phy, len, memtype, rw)
 
 #define BX_INSTR_BEFORE_EXECUTION(cpu_id, i) \
   bx_instr_before_execution(cpu_id, i)
@@ -74,7 +71,7 @@ void bx_instr_before_execution(unsigned cpu, bxInstruction_c *i);
 #define BX_INSTR_CNEAR_BRANCH_TAKEN(cpu_id, branch_eip, new_eip)
 #define BX_INSTR_CNEAR_BRANCH_NOT_TAKEN(cpu_id, branch_eip)
 #define BX_INSTR_UCNEAR_BRANCH(cpu_id, what, branch_eip, new_eip)
-#define BX_INSTR_FAR_BRANCH(cpu_id, what, new_cs, new_eip)
+#define BX_INSTR_FAR_BRANCH(cpu_id, what, prev_cs, prev_eip, new_cs, new_eip)
 
 /* decoding completed */
 #define BX_INSTR_OPCODE(cpu_id, i, opcode, len, is32, is64)
@@ -95,7 +92,7 @@ void bx_instr_before_execution(unsigned cpu, bxInstruction_c *i);
 #define BX_INSTR_REPEAT_ITERATION(cpu_id, i)
 
 /* physical memory access */
-#define BX_INSTR_PHY_ACCESS(cpu_id, phy, len, rw)
+#define BX_INSTR_PHY_ACCESS(cpu_id, phy, len, memtype, rw)
 
 /* feedback from device units */
 #define BX_INSTR_INP(addr, len)
@@ -105,5 +102,5 @@ void bx_instr_before_execution(unsigned cpu, bxInstruction_c *i);
 /* wrmsr callback */
 #define BX_INSTR_WRMSR(cpu_id, addr, value)
 
-#endif  // KFETCH_TOOLKIT_INSTRUMENT_H_
+#endif  // BOCHSPWN_INSTRUMENT_H_
 

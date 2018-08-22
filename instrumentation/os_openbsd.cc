@@ -3,7 +3,7 @@
 // Authors: Mateusz Jurczyk (mjurczyk@google.com)
 //          Gynvael Coldwind (gynvael@google.com)
 //
-// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright 2013-2018 Google LLC
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@
 #include <cstdlib>
 
 #include "common.h"
+#include "events.h"
 #include "instrument.h"
 #include "logging.pb.h"
 
@@ -67,7 +68,7 @@ static bool get_proc_pgid_pid(BX_CPU_C *pcpu, uint64_t kernel_gs_base,
 bool init(const char *config_path, void *unused) {
   char buffer[256];
 
-  // Read Linux-specific configuration.
+  // Read OpenBSD-specific configuration.
   READ_INI_INT(config_path, globals::config.os_version, "cpu_info_ci_curproc",
                buffer, sizeof(buffer), &off_cpu_info_ci_curproc);
   READ_INI_INT(config_path, globals::config.os_version, "proc_p_addr",
@@ -109,7 +110,7 @@ bool init(const char *config_path, void *unused) {
 
   // Put the kernel address and size in the special module list.
   module_info *mi = new module_info(kernel_start, kernel_end - kernel_start, "kernel");
-  globals::special_modules.push_back(mi);
+  events::event_new_module(mi);
 
   // Check some assumptions.
   if (conf_comm_size >= MAX_PROC_COMM_LEN) {
@@ -230,13 +231,11 @@ bool fill_info(BX_CPU_C *pcpu, void *unused) {
     log_data_st::callstack_item *new_item = globals::last_ld.add_stack_trace();
 
     if (ip >= kernel_start && ip <= kernel_end) {
+      new_item->set_module_idx(0);
       new_item->set_relative_pc(ip - kernel_start);
-      new_item->set_module_base(kernel_start);
-      new_item->set_module_name("kernel");
     } else {
+      new_item->set_module_idx(-1);
       new_item->set_relative_pc(ip);
-      new_item->set_module_base(0);
-      new_item->set_module_name("unknown");
     }
 
     // Inject?

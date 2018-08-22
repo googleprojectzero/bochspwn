@@ -3,7 +3,7 @@
 // Authors: Mateusz Jurczyk (mjurczyk@google.com)
 //          Gynvael Coldwind (gynvael@google.com)
 //
-// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright 2013-2018 Google LLC
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,14 +18,15 @@
 // limitations under the License.
 //
 
-#ifndef KFETCH_TOOLKIT_SYMBOLS_H_
-#define KFETCH_TOOLKIT_SYMBOLS_H_
+#ifndef BOCHSPWN_SYMBOLS_H_
+#define BOCHSPWN_SYMBOLS_H_
 
-#include <stdint.h>
-#include <map>
-#include <string>
 #include <windows.h>
 #include "DbgHelp.h"
+
+#include <cstdint>
+#include <map>
+#include <string>
 
 #include "common.h"
 
@@ -51,7 +52,7 @@ struct symbol_info_package : public SYMBOL_INFO_PACKAGE {
 // ------------------------------------------------------------------
 // Public interface.
 // ------------------------------------------------------------------
-std::string symbolize(std::string module, uint32_t offset);
+std::string symbolize(const std::string& module, uint32_t offset);
 
 // ------------------------------------------------------------------
 // Helper functions.
@@ -61,16 +62,14 @@ void destroy();
 
 const std::string strip_ext(const std::string file_name);
 
-bool get_file_params(const char *file_name, uint64_t *base_address, uint32_t *file_size);
-bool get_file_size(const char *file_name, uint32_t *file_size);
+bool get_file_params(const std::string& module, uint64_t *base_address, uint32_t *file_size);
 
 // ------------------------------------------------------------------
 // Globals.
 // ------------------------------------------------------------------
-extern uint64_t cur_base_address;
 extern std::map<std::string, driver_sym *> known_modules;
 
 }  // namespace symbols
 
-#endif  // KFETCH_TOOLKIT_SYMBOLS_H_
+#endif  // BOCHSPWN_SYMBOLS_H_
 

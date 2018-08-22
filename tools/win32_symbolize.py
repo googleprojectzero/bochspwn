@@ -3,7 +3,7 @@
 # Authors: Mateusz Jurczyk (mjurczyk@google.com)
 #          Gynvael Coldwind (gynvael@google.com)
 #
-# Copyright 2013 Google Inc. All Rights Reserved.
+# Copyright 2013-2018 Google LLC
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,9 +19,9 @@
 #
 
 import os
-import sys
 import re
 import subprocess
+import sys
 
 def main(argv):
   if len(argv) < 3:
@@ -30,17 +30,16 @@ def main(argv):
 
   try:
     f = open(argv[1], "r")
-  except:
+  except IOError:
     sys.stderr.write("Unable to open input file \"%s\"\n" % argv[1])
     sys.exit(1)
 
   symbols_path = sys.argv[2]
   for line in f:
     while True:
-
-      match = re.match("([a-zA-Z0-9]+\.[a-z]+)\+([0-9a-fA-F]+).*", line)
+      match = re.match("([a-zA-Z0-9]+\.[a-zA-Z]+)\+([0-9a-fA-F]+).*", line)
       if match == None:
-        match = re.match(".*[^a-zA-Z0-9.]+([a-zA-Z0-9]+\.[a-z]+)\+([0-9a-fA-F]+).*", line)
+        match = re.match(".*[^a-zA-Z0-9.]+([a-zA-Z0-9]+\.[a-zA-Z]+)\+([0-9a-fA-F]+).*", line)
         if match == None:
           break
     
@@ -55,7 +54,7 @@ def main(argv):
         sys.stderr.write("PDB file \"%s\" for module \"%s\" not found\n" % (pdb_path, image_name))
         break
 
-      p = subprocess.Popen(["win32_symbolize.exe", pdb_path, offset], 
+      p = subprocess.Popen([os.path.dirname(os.path.realpath(__file__)) + "\\win32_symbolize.exe", pdb_path, offset], 
                            stdout = subprocess.PIPE, stderr = subprocess.PIPE)
       stdout, stderr = p.communicate()
       
@@ -63,6 +62,7 @@ def main(argv):
         sys.stderr.write("Native symbolizer failed with code %u: \"%s\"\n" % (p.returncode, stderr))
       else:
         line = line.replace("%s+%s" % (image_name, offset), "(%.8x) %s!%s" % (int(offset, 16), file_name, stdout.strip()))
+      break
 
     # Display the final version of the line
     print line.strip()

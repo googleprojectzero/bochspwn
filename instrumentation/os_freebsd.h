@@ -3,7 +3,7 @@
 // Authors: Mateusz Jurczyk (mjurczyk@google.com)
 //          Gynvael Coldwind (gynvael@google.com)
 //
-// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright 2013-2018 Google LLC
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,10 +18,10 @@
 // limitations under the License.
 //
 
-#ifndef KFETCH_TOOLKIT_OS_FREEBSD_H_
-#define KFETCH_TOOLKIT_OS_FREEBSD_H_
+#ifndef BOCHSPWN_OS_FREEBSD_H_
+#define BOCHSPWN_OS_FREEBSD_H_
 
-#include <stdint.h>
+#include <cstdint>
 
 #include "common.h"
 
@@ -52,5 +52,5 @@ bool instr_before_execution(BX_CPU_C *, bxInstruction_c *);
 
 }  // namespace freebsd
 
-#endif  // KFETCH_TOOLKIT_OS_FREEBSD_H_
+#endif  // BOCHSPWN_OS_FREEBSD_H_
 

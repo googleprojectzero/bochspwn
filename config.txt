@@ -1,21 +1,71 @@
 [general]
-log_path            = memlog.txt
-mode                = offline
+trace_log_path      = memlog.bin
+modules_list_path   = modules.bin
 
-os                  = linux
-bitness             = 64
-version             = ubuntu_server_64_3.8.0-23-generic
+os                  = windows
+bitness             = 32
+version             = win10_32
 
-min_read_size       = 2
+min_read_size       = 1
 max_read_size       = 16
-min_write_size      = 4
-max_write_size      = 4
+min_write_size      = 1
+max_write_size      = 16
 
-callstack_length    = 6
+callstack_length    = 48
 write_as_text       = 0
 
 symbolize           = 0
 symbol_path         = <symbols path>
+
+[win7_32]
+kprcb               = 0x120
+current_thread      = 0x04
+tcb                 = 0x0
+process             = 0x150
+client_id           = 0x22c
+process_id          = 0
+thread_id           = 4
+create_time         = 0x200
+image_filename      = 0x16c
+kdversionblock      = 0x34
+psloadedmodulelist  = 0x18
+loadorder_flink     = 0x0
+basedllname         = 0x2c
+baseaddress         = 0x18
+sizeofimage         = 0x20
+us_len              = 0x0
+us_buffer           = 0x4
+teb_cid             = 0x20
+irql                = 0x24
+previous_mode       = 0x13a
+exception_list      = 0x0
+next_exception      = 0x0
+try_level           = 0xc
+
+[win10_32]
+kprcb               = 0x120
+current_thread      = 0x04
+tcb                 = 0x0
+process             = 0x150
+client_id           = 0x374
+process_id          = 0
+thread_id           = 4
+create_time         = 0x348
+image_filename      = 0x174
+kdversionblock      = 0x34
+psloadedmodulelist  = 0x18
+loadorder_flink     = 0x0
+basedllname         = 0x2c
+baseaddress         = 0x18
+sizeofimage         = 0x20
+us_len              = 0x0
+us_buffer           = 0x4
+teb_cid             = 0x20
+irql                = 0x24
+previous_mode       = 0x15a
+exception_list      = 0x0
+next_exception      = 0x0
+try_level           = 0xc
 
 [obsd-5.3-amd64]
 cpu_info_ci_curproc = 0x288
@@ -112,66 +162,3 @@ module_core_size    = 0x16c
 module_name_len     = 56
 kernel_start        = 0xffffffff81000000
 kernel_end          = 0xffffffff82346000
-
-[win7_32]
-kprcb               = 0x120
-current_thread      = 0x04
-tcb                 = 0x0
-process             = 0x150
-client_id           = 0x22c
-process_id          = 0
-thread_id           = 4
-create_time         = 0x200
-image_filename      = 0x16c
-kdversionblock      = 0x34
-psloadedmodulelist  = 0x18
-loadorder_flink     = 0x0
-basedllname         = 0x2c
-baseaddress         = 0x18
-sizeofimage         = 0x20
-us_len              = 0x0
-us_buffer           = 0x4
-teb_cid             = 0x20
-irql                = 0x24
-
-[win8_32]
-kprcb               = 0x120
-current_thread      = 0x04
-tcb                 = 0x0
-process             = 0x150
-client_id           = 0x214
-process_id          = 0
-thread_id           = 4
-create_time         = 0x1E8
-image_filename      = 0x170
-kdversionblock      = 0x34
-psloadedmodulelist  = 0x18
-loadorder_flink     = 0x0
-basedllname         = 0x2c
-baseaddress         = 0x18
-sizeofimage         = 0x20
-us_len              = 0x0
-us_buffer           = 0x4
-teb_cid             = 0x20
-irql                = 0x24
-
-[win8_64]
-kprcb               = 0x180
-current_thread      = 0x08
-tcb                 = 0x0
-process             = 0x220
-client_id           = 0x398
-process_id          = 0
-thread_id           = 8
-create_time         = 0x348
-image_filename      = 0x438
-psloadedmodulelist  = 0xfffffffffffd4a60
-loadorder_flink     = 0x0
-basedllname         = 0x58
-baseaddress         = 0x30
-sizeofimage         = 0x40
-us_len              = 0x0
-us_buffer           = 0x8
-teb_cid             = 0x40
-irql                = 0x50
-64bit_teb           = 0x30

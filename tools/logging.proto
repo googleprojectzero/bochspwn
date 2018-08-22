@@ -3,7 +3,7 @@
 // Authors: Mateusz Jurczyk (mjurczyk@google.com)
 //          Gynvael Coldwind (gynvael@google.com)
 //
-// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright 2013-2018 Google LLC
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
+syntax = "proto2";
 
+// Descriptor of a single executable module referenced in the stack trace(s) of
+// one or more memory access logs.
+message module_st {
+  required string name = 1;
+  required uint64 base_addr = 2;
+  required uint64 size = 3;
+}
+
+// Descriptor of a single memory access, saved in the trace log file.
 message log_data_st {
   // Linear address of the accessed memory.
   required uint64 lin = 1;
@@ -66,18 +76,30 @@ message log_data_st {
   required uint64 create_time = 11;
 
   message callstack_item {
-    required uint64 relative_pc = 1;
-    required uint64 module_base = 2;
-    required string module_name = 3;
+    required int32 module_idx = 1;
+    required uint64 relative_pc = 2;
+    required uint64 stack_frame = 3;
+    
+    // XXX: Windows 32-bit only. If the function has a SEH exception record,
+    // the value contains the TryLevel field of the _EH3_EXCEPTION_REGISTRATION
+    // structure, which indicates if the specific area of code being executed is
+    // guarded by a try/except statement or not. A value of 0xFFFFFFFE means the
+    // exception handler is disabled, while positive values close to 0 identify
+    // an active try/except block.
+    optional uint32 try_level = 4;
   }
 
-  // A stack trace limited to a maximum of four entries.
+  // A stack trace at the time of the memory access.
   //
-  // Note: stack_trace[0].module_base + stack_trace[0].relative_pc should
-  // be equal to the "pc" value.
+  // Note: modules[stack_trace[0].module_idx].base_addr + stack_trace[0].relative_pc
+  // should be equal to the "pc" value.
   repeated callstack_item stack_trace = 12;
 
   // Textual representation of the memory-fetching instruction.
   required string pc_disasm = 13;
+
+  // XXX: Windows only. The field contains the PreviousMode bit denoting
+  // whether the system service was called from user or kernel-mode.
+  optional uint32 previous_mode = 14;
 }
 

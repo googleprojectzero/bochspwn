@@ -3,7 +3,7 @@
 // Authors: Mateusz Jurczyk (mjurczyk@google.com)
 //          Gynvael Coldwind (gynvael@google.com)
 //
-// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright 2013-2018 Google LLC
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,18 +18,20 @@
 // limitations under the License.
 //
 
-#include <stdint.h>
-#include <stdarg.h>
+#include <windows.h>
+
+#include <cstdarg>
+#include <cstdint>
 #include <map>
 #include <string>
 #include <vector>
-#include <windows.h>
 
 #include "bochs.h"
 #include "cpu/cpu.h"
 #include "disasm/disasm.h"
 
 #include "common.h"
+#include "events.h"
 #include "instrument.h"
 #include "invoke.h"
 #include "logging.pb.h"
@@ -38,7 +40,7 @@
 // ------------------------------------------------------------------
 // Helper declarations.
 // ------------------------------------------------------------------
-static bool init_basic_config(const char *path, kfetch_config *instr_config);
+static bool init_basic_config(const char *path, bochspwn_config *config);
 static void process_mem_access(BX_CPU_C *pcpu, bx_address lin, unsigned len, bx_address pc,
                                log_data_st::mem_access_type access_type, char *disasm);
 static void destroy_globals();
@@ -50,7 +52,6 @@ static void destroy_globals();
 // Callback invoked on Bochs CPU initialization.
 void bx_instr_initialize(unsigned cpu) {
   char *conf_path = NULL;
-  BX_CPU_C *pcpu = BX_CPU(cpu);
 
   // Initialize symbols subsystem.
   symbols::initialize();
@@ -68,14 +69,23 @@ void bx_instr_initialize(unsigned cpu) {
     abort();
   }
 
-  // Initialize output file handle for the first time.
-  globals::config.file_handle = fopen(globals::config.log_path, "wb");
-  if (!globals::config.file_handle) {
-    fprintf(stderr, "Unable to open the \"%s\" log file\n", globals::config.log_path);
+  // Initialize output trace log file handle for the first time.
+  globals::config.trace_file = fopen(globals::config.trace_log_path, "wb");
+  if (!globals::config.trace_file) {
+    fprintf(stderr, "Unable to open the \"%s\" trace log file\n", globals::config.trace_log_path);
     abort();
   }
   // Set internal buffer size to 32kB for performance reasons.
-  setvbuf(globals::config.file_handle, NULL, _IOFBF, 32 * 1024);
+  setvbuf(globals::config.trace_file, NULL, _IOFBF, 32 * 1024);
+
+  // Initialize modules output file handle for the first time.
+  globals::config.modules_file = fopen(globals::config.modules_list_path, "wb");
+  if (!globals::config.modules_file) {
+    fprintf(stderr, "Unable to open the \"%s\" modules log file\n", globals::config.modules_list_path);
+    abort();
+  }
+  // Disable buffering for the file.
+  setbuf(globals::config.modules_file, NULL);
 
   // Allow the guest-specific part to initialize (read internal offsets etc).
   if (!invoke_system_handler(BX_OS_EVENT_INIT, conf_path, NULL)) {
@@ -97,10 +107,10 @@ void bx_instr_exit(unsigned cpu) {
 //
 // Note: the BX_INSTR_LIN_ACCESS instrumentation doesn't work when
 // repeat-speedups feature is enabled. Always remember to set
-// BX_SUPPORT_REPEAT_SPEEDUPS to 0 in config.h, otherwise kfetch-toolkit might
+// BX_SUPPORT_REPEAT_SPEEDUPS to 0 in config.h, otherwise Bochspwn might
 // not work correctly.
 void bx_instr_lin_access(unsigned cpu, bx_address lin, bx_address phy,
-                         unsigned len, unsigned rw) {
+                         unsigned len, unsigned memtype, unsigned rw) {
   BX_CPU_C *pcpu = BX_CPU(cpu);
 
   // Not going to use physical memory address.
@@ -174,9 +184,8 @@ void bx_instr_lin_access(unsigned cpu, bx_address lin, bx_address phy,
   static Bit8u ibuf[32] = {0};
   static char pc_disasm[64];
   if (read_lin_mem(pcpu, pc, sizeof(ibuf), ibuf)) {
-    static disassembler bx_disassemble;
-    bx_disassemble.disasm(mode == 32, mode == 64, 0,
-                          pc, ibuf, pc_disasm);
+    disassembler bx_disassemble;
+    bx_disassemble.disasm(mode == 32, mode == 64, 0, pc, ibuf, pc_disasm);
   }
 
   // With basic information filled in, process the access further.
@@ -189,6 +198,11 @@ void bx_instr_before_execution(unsigned cpu, bxInstruction_c *i) {
   static client_id thread;
   BX_CPU_C *pcpu = BX_CPU(cpu);
   unsigned opcode;
+
+  // We're not interested in instructions executed in real mode.
+  if (!pcpu->protected_mode() && !pcpu->long64_mode()) {
+    return;
+  }
 
   // If the system needs an additional invokement from here, call it now.
   if (globals::has_instr_before_execution_handler) {
@@ -204,13 +218,19 @@ void bx_instr_before_execution(unsigned cpu, bxInstruction_c *i) {
     return;
   }
 
+  // The only two allowed interrupts are int 0x2e and int 0x80, which are legacy
+  // ways to invoke system calls on Windows and linux, respectively.
+  if (opcode == BX_IA_INT_Ib && i->Ib() != 0x2e && i->Ib() != 0x80) {
+    return;
+  }
+
   // Obtain information about the current process/thread IDs.
   if (!invoke_system_handler(BX_OS_EVENT_FILL_CID, pcpu, &thread)) {
     return;
   }
 
   // Process information about a new syscall depending on the current mode.
-  if (!invoke_mode_handler(BX_MODE_EVENT_NEW_SYSCALL, pcpu, &thread)) {
+  if (!events::event_new_syscall(pcpu, &thread)) {
     return;
   }
 }
@@ -219,33 +239,21 @@ void bx_instr_before_execution(unsigned cpu, bxInstruction_c *i) {
 // Helper functions' implementation.
 // ------------------------------------------------------------------
 
-static bool init_basic_config(const char *config_path, kfetch_config *config) {
+static bool init_basic_config(const char *config_path, bochspwn_config *config) {
   static char buffer[256];
 
-  // Output file path.
-  READ_INI_STRING(config_path, "general", "log_path", buffer, sizeof(buffer));
-  config->log_path = strdup(buffer);
+  // Trace output file path.
+  READ_INI_STRING(config_path, "general", "trace_log_path", buffer, sizeof(buffer));
+  config->trace_log_path = strdup(buffer);
 
-  // Logging mode.
-  READ_INI_STRING(config_path, "general", "mode", buffer, sizeof(buffer));
-
-  bool found = false;
-  for (unsigned int i = 0; kSupportedModes[i].name != NULL; i++) {
-    if (!strcmp(buffer, kSupportedModes[i].name)) {
-      config->mode = kSupportedModes[i].mode;
-      found = true;
-      break;
-    }
-  }
-  if (!found) {
-    fprintf(stderr, "Unsupported kfetch-toolkit mode \"%s\"\n", buffer);
-    return false;
-  }
+  // Modules list file path.
+  READ_INI_STRING(config_path, "general", "modules_list_path", buffer, sizeof(buffer));
+  config->modules_list_path = strdup(buffer);
 
   // Operating system.
   READ_INI_STRING(config_path, "general", "os", buffer, sizeof(buffer));
 
-  found = false;
+  bool found = false;
   for (unsigned int i = 0; kSupportedSystems[i] != NULL; i++) {
     if (!strcmp(buffer, kSupportedSystems[i])) {
       config->system = strdup(buffer);
@@ -296,6 +304,7 @@ static bool init_basic_config(const char *config_path, kfetch_config *config) {
   return true;
 }
 
+__attribute__((noinline))
 static void process_mem_access(BX_CPU_C *pcpu, bx_address lin, unsigned len,
                                bx_address pc, log_data_st::mem_access_type access_type,
                                char *disasm) {
@@ -310,7 +319,7 @@ static void process_mem_access(BX_CPU_C *pcpu, bx_address lin, unsigned len,
     // It's a separate one. Print out last_ld if it was present.
     if (globals::last_ld_present) {
       globals::last_ld.set_repeated(last_repeated);
-      invoke_mode_handler(BX_MODE_EVENT_PROCESS_LOG, NULL, NULL);
+      events::event_process_log();
     }
 
     globals::last_ld.Clear();
@@ -334,15 +343,8 @@ static void destroy_globals() {
   }
   globals::modules.clear();
 
-  for (unsigned int i = 0; i < globals::special_modules.size(); i++) {
-    delete globals::special_modules[i];
-  }
-  globals::special_modules.clear();
-
   globals::thread_states.clear();
 
   globals::last_ld_present = false;
-
-  globals::online::known_callstack_item.clear();
 }
 

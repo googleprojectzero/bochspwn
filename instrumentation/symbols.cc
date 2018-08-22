@@ -3,7 +3,7 @@
 // Authors: Mateusz Jurczyk (mjurczyk@google.com)
 //          Gynvael Coldwind (gynvael@google.com)
 //
-// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright 2013-2018 Google LLC
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
 
 #include "symbols.h"
 
-#include <stdint.h>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -31,10 +31,9 @@
 
 namespace symbols {
 
-uint64_t cur_base_address;
 std::map<std::string, driver_sym *> known_modules;
 
-std::string symbolize(const std::string module, uint32_t offset) {
+std::string symbolize(const std::string& module, uint32_t offset) {
   static char pdb_path[256];
   static char buffer[256];
   std::map<std::string, driver_sym *>::iterator it;
@@ -48,7 +47,7 @@ std::string symbolize(const std::string module, uint32_t offset) {
     snprintf(pdb_path, sizeof(pdb_path), "%s\\%s.pdb", globals::config.symbol_path,
              strip_ext(module).c_str());
 
-    if (!get_file_params(pdb_path, &module_base, &file_size)) {
+    if (!get_file_params(module, &module_base, &file_size)) {
       fprintf(stderr, "Unable to find \"%s\" debug file\n", pdb_path);
 
       known_modules[module] = new driver_sym(0, 0);
@@ -86,8 +85,6 @@ std::string symbolize(const std::string module, uint32_t offset) {
 }
 
 void initialize() {
-  cur_base_address = 0x20000000;
-
   uint32_t options = SymGetOptions();
   options |= SYMOPT_DEBUG;
   SymSetOptions(options);
@@ -118,36 +115,16 @@ const std::string strip_ext(const std::string file_name) {
   return file_name.substr(0, x);
 }
 
-bool get_file_params(const char *file_name, uint64_t *base_address, uint32_t *file_size) {
-  bool ret;
-
-  if (!file_name) {
+bool get_file_params(const std::string& module, uint64_t *base_address, uint32_t *file_size) {
+  int idx = find_module_by_name(module);
+  if (idx == -1) {
     return false;
   }
 
-  ret = get_file_size(file_name, file_size);
-  if (ret) {
-    *base_address = cur_base_address;
-    cur_base_address += *file_size;
-  }
-
-  return ret;
-}
-
-bool get_file_size(const char *file_name, uint32_t *file_size) {
-  if (!file_name) {
-    return false;
-  }
-
-  HANDLE file = CreateFile(file_name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-  if (file == INVALID_HANDLE_VALUE) {
-    return false;
-  }
-
-  *file_size = GetFileSize(file, NULL);
-  CloseHandle(file);
-
-  return (*file_size != INVALID_FILE_SIZE);
+  const module_info *mi = globals::modules[idx];
+  *base_address = mi->module_base;
+  *file_size = mi->module_size;
+  return true;
 }
 
 }  // namespace symbols

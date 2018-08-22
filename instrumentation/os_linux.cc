@@ -3,7 +3,7 @@
 // Authors: Mateusz Jurczyk (mjurczyk@google.com)
 //          Gynvael Coldwind (gynvael@google.com)
 //
-// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright 2013-2018 Google LLC
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@
 #include <cstdlib>
 
 #include "common.h"
+#include "events.h"
 #include "instrument.h"
 #include "logging.pb.h"
 
@@ -77,7 +78,7 @@ struct module_summary_st {
 static bool get_task_struct_pid_gid(BX_CPU_C *pcpu, uint64_t rsp, uint64_t *addr_task_struct,
                                     uint32_t *tgid, uint32_t *pid);
 static bool fetch_module_info(BX_CPU_C *pcpu, uint64_t module_ptr, module_summary_st *m);
-static module_info *update_module_list(BX_CPU_C *pcpu, uint64_t pc);
+static int update_module_list(BX_CPU_C *pcpu, uint64_t pc);
 
 bool init(const char *config_path, void *unused) {
   char buffer[256];
@@ -115,9 +116,8 @@ bool init(const char *config_path, void *unused) {
                buffer, sizeof(buffer), &kernel_end);
 
   // Put the kernel address and size in the special module list.
-  module_info *mi = new module_info(kernel_start, kernel_end - kernel_start,
-                                    "kernel");
-  globals::special_modules.push_back(mi);
+  module_info *mi = new module_info(kernel_start, kernel_end - kernel_start, "kernel");
+  events::event_new_module(mi);
 
   // Check some assumptions.
   if (conf_task_comm_len >= MAX_TASK_COMM_LEN) {
@@ -174,6 +174,7 @@ bool check_kernel_addr(uint64_t *addr, void *unused) {
 
 bool check_user_addr(uint64_t *addr, void *unused) {
   if (guest_ptr_size == 4) {
+    return (*addr < 0xC0000000);
   }
 
   return (*addr < 0x0000080000000000LL);
@@ -252,6 +253,7 @@ bool fill_info(BX_CPU_C *pcpu, void *unused) {
   // Set the call stack.
   uint64_t ip = pc;
   uint64_t bp = pcpu->gen_reg[BX_64BIT_REG_RBP].rrx;
+  int mod_idx = -1;
   module_info *mi = NULL;
 
   for (unsigned int i = 0; i < globals::config.callstack_length &&
@@ -259,21 +261,25 @@ bool fill_info(BX_CPU_C *pcpu, void *unused) {
                            bp >= kernel_space_boundary; i++) {
     // Optimization: check last module first.
     if (!mi || mi->module_base > ip || mi->module_base + mi->module_size <= ip) {
-      mi = find_module(ip);
-      if (!mi) {
-        mi = update_module_list(pcpu, ip);
+      mod_idx = find_module(ip);
+      if (mod_idx == -1) {
+        mod_idx = update_module_list(pcpu, ip);
+      }
+
+      if (mod_idx != -1) {
+        mi = globals::modules[mod_idx];
+      } else {
+        mi = NULL;
       }
     }
 
     log_data_st::callstack_item *new_item = globals::last_ld.add_stack_trace();
+    
+    new_item->set_module_idx(mod_idx);
     if (mi) {
       new_item->set_relative_pc(ip - mi->module_base);
-      new_item->set_module_base(mi->module_base);
-      new_item->set_module_name(mi->module_name);
     } else {
       new_item->set_relative_pc(ip);
-      new_item->set_module_base(0);
-      new_item->set_module_name("unknown");
     }
 
     if (!bp || !read_lin_mem(pcpu, bp + guest_ptr_size, guest_ptr_size, &ip) ||
@@ -291,12 +297,12 @@ bool fill_info(BX_CPU_C *pcpu, void *unused) {
 
 // Traverse the kernel module list to get the information about the
 // driver that the "pc" is in.
-static module_info *update_module_list(BX_CPU_C *pcpu, uint64_t pc) {
+static int update_module_list(BX_CPU_C *pcpu, uint64_t pc) {
   // Get the address of the beginning of the list.
   uint64_t modules_start;
   if (!read_lin_mem(pcpu, addr_modules, guest_ptr_size, &modules_start)) {
     // It may be not yet loaded.
-    return NULL;
+    return -1;
   }
 
   // Traverse the list.
@@ -313,8 +319,8 @@ static module_info *update_module_list(BX_CPU_C *pcpu, uint64_t pc) {
     if (pc >= m.core_addr && pc < m.core_addr + m.core_size) {
       // Yes. We found it!
       module_info *mi = new module_info(m.core_addr, m.core_size, m.name);
-      globals::modules.push_back(mi);
-      return mi;
+      events::event_new_module(mi);
+      return globals::modules.size() - 1;
     }
 
     // Iteratre.
@@ -326,13 +332,12 @@ static module_info *update_module_list(BX_CPU_C *pcpu, uint64_t pc) {
   }
 
   // Not found.
-  return NULL;
+  return -1;
 }
 
 // Note: This expects module_ptr to be passed without offset correction.
 //       The correction will be made in this function.
-static bool fetch_module_info(BX_CPU_C *pcpu, uint64_t module_ptr,
-    module_summary_st *m) {
+static bool fetch_module_info(BX_CPU_C *pcpu, uint64_t module_ptr, module_summary_st *m) {
 
   // Correct offset.
   module_ptr -= off_module_list;
@@ -345,14 +350,14 @@ static bool fetch_module_info(BX_CPU_C *pcpu, uint64_t module_ptr,
 
   // Try to fetch name.
   if (!read_lin_mem(pcpu, module_ptr + off_module_name,
-                   conf_module_name_len, m->name)) {
+                    conf_module_name_len, m->name)) {
     return false;
   }
 
   // Fetch list pointers in one read.
   unsigned char temp_buffer[2 * 8];  // At most: two 64-bit pointers.
   if (!read_lin_mem(pcpu, module_ptr + off_module_list,
-                   2 * guest_ptr_size, temp_buffer)) {
+                    2 * guest_ptr_size, temp_buffer)) {
     return false;
   }
 
@@ -366,7 +371,7 @@ static bool fetch_module_info(BX_CPU_C *pcpu, uint64_t module_ptr,
 
   // Check sanity of these pointers. If they are not sane, something's wrong.
   if (m->l_next < kernel_space_boundary ||
-     m->l_prev < kernel_space_boundary) {
+      m->l_prev < kernel_space_boundary) {
     return false;
   }
 
@@ -378,7 +383,7 @@ static bool fetch_module_info(BX_CPU_C *pcpu, uint64_t module_ptr,
 
   // Check sanity of both core address and size.
   if (m->core_addr < kernel_space_boundary ||
-     m->core_size > MAX_MODULE_SIZE) {
+      m->core_size > MAX_MODULE_SIZE) {
     return false;
   }
 

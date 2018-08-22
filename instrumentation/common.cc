@@ -3,7 +3,7 @@
 // Authors: Mateusz Jurczyk (mjurczyk@google.com)
 //          Gynvael Coldwind (gynvael@google.com)
 //
-// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright 2013-2018 Google LLC
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,16 +20,16 @@
 
 #include "common.h"
 
-#include <vector>
+#include <cstdio>
 #include <map>
+#include <vector>
 
 #include "logging.pb.h"
 #include "symbols.h"
 
 // See instrumentation.h for globals' documentation.
 namespace globals {
-  kfetch_config config;
-  std::vector<module_info *> special_modules;
+  bochspwn_config config;
   std::vector<module_info *> modules;
   std::map<client_id, thread_info> thread_states;
 
@@ -37,55 +37,38 @@ namespace globals {
   bool last_ld_present;
 
   bool has_instr_before_execution_handler;
-
-namespace online {
-  std::set<uint64_t> known_callstack_item;
-}  // namespace online
-
 }  // namespace globals
 
-// Debugging helper function.
-int dbg_print(const char *fmt, ...) {
-  va_list args;
-  int ret = 0;
-
-  va_start(args, fmt);
-  ret = vfprintf(stderr, fmt, args);
-  va_end(args);
-
-  return ret;
-}
-
-// Given a kernel-mode virtual address, returns the image base of the
-// corresponding module or NULL, if one is not found. Assuming that every
-// executed address belongs to a valid PE address at any given time, not finding
-// an address should be interpreted as a signal to update the current module
-// database.
-module_info* find_module(bx_address item) {
-  unsigned int sz = globals::special_modules.size();
-
-  // Prioritize the special_modules list, as it contains the most commonly
-  // encountered images (e.g. ntoskrnl, win32k for Windows).
-  for (unsigned int i = 0; i < sz; i++) {
-    if (globals::special_modules[i]->module_base <= item &&
-        globals::special_modules[i]->module_base + globals::special_modules[i]->module_size > item) {
-      return globals::special_modules[i];
-    }
-  }
-
-  // Search through the remaining known modules.
-  sz = globals::modules.size();
+// Given a kernel-mode virtual address, returns an index of the corresponding
+// module descriptor in globals::modules, or -1, if it's not found. Assuming
+// that every executed address belongs to a valid PE address at any given time,
+// not finding an address should be interpreted as a signal to update the current
+// module database.
+int find_module(bx_address item) {
+  unsigned int sz = globals::modules.size();
   for (unsigned int i = 0; i < sz; i++) {
     if (globals::modules[i]->module_base <= item &&
         globals::modules[i]->module_base + globals::modules[i]->module_size > item) {
-      return globals::modules[i];
+      return i;
     }
   }
 
-  return NULL;
+  return -1;
 }
 
-// Returns the contents of a single log record in formatted, textual form.
+// Given a kernel driver name, returns an index of the corresponding module
+// descriptor in globals::modules, or -1, if it's not found.
+int find_module_by_name(const std::string& module) {
+  unsigned int sz = globals::modules.size();
+  for (unsigned int i = 0; i < sz; i++) {
+    if (!strcmp(globals::modules[i]->module_name, module.c_str())) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
 std::string LogDataAsText(const log_data_st& ld) {
   char buffer[256];
   std::string ret;
@@ -107,25 +90,48 @@ std::string LogDataAsText(const log_data_st& ld) {
            ld.pc_disasm().c_str());
   ret = buffer;
 
-  for (unsigned int i = 0; i < ld.stack_trace_size(); i++) {
-    if (globals::config.symbolize) {
-      snprintf(buffer, sizeof(buffer), " #%u  0x%llx (%s)\n", i,
-               (ld.stack_trace(i).module_base() + ld.stack_trace(i).relative_pc()),
-               symbols::symbolize(ld.stack_trace(i).module_name(),
-                                  ld.stack_trace(i).relative_pc()).c_str());
+  if (ld.has_previous_mode()) {
+    snprintf(buffer, sizeof(buffer), "[previous mode: %d]\n", ld.previous_mode());
+    ret += buffer;
+  }
+
+  for (int i = 0; i < ld.stack_trace_size(); i++) {
+    int module_idx = ld.stack_trace(i).module_idx();
+
+    if (module_idx != -1) {
+      if (globals::config.symbolize) {
+        snprintf(buffer, sizeof(buffer), " #%u  0x%llx (%s)", i,
+                 (globals::modules[module_idx]->module_base + ld.stack_trace(i).relative_pc()),
+                 symbols::symbolize(globals::modules[module_idx]->module_name,
+                                    ld.stack_trace(i).relative_pc()).c_str());
+      } else {
+        snprintf(buffer, sizeof(buffer), " #%u  0x%llx (%s+%.8x)", i,
+                 (globals::modules[module_idx]->module_base + ld.stack_trace(i).relative_pc()),
+                 globals::modules[module_idx]->module_name,
+                 (unsigned)ld.stack_trace(i).relative_pc());
+      }
     } else {
-      snprintf(buffer, sizeof(buffer), " #%u  0x%llx (%s+%.8x)\n", i,
-               (ld.stack_trace(i).module_base() + ld.stack_trace(i).relative_pc()),
-               ld.stack_trace(i).module_name().c_str(),
-               (unsigned)ld.stack_trace(i).relative_pc());
+      snprintf(buffer, sizeof(buffer), " #%u  0x%llx (???"")",
+               i, (ld.stack_trace(i).relative_pc()));
     }
     ret += buffer;
+
+    if (ld.stack_trace(i).has_try_level()) {
+      uint32_t try_level = ld.stack_trace(i).try_level();
+      if (try_level == 0xFFFFFFFE) {
+        snprintf(buffer, sizeof(buffer), " <===== SEH disabled");
+      } else {
+        snprintf(buffer, sizeof(buffer), " <===== SEH enabled (#%u)", try_level);
+      }
+      ret += buffer;
+    }
+
+    ret += "\n";
   }
 
   return ret;
 }
 
-// Translate memory access type enum into textual representation.
 const char *translate_mem_access(log_data_st::mem_access_type type) {
   switch (type) {
     case log_data_st::MEM_READ: return "READ";

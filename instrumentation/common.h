@@ -3,7 +3,7 @@
 // Authors: Mateusz Jurczyk (mjurczyk@google.com)
 //          Gynvael Coldwind (gynvael@google.com)
 //
-// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright 2013-2018 Google LLC
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,43 +18,39 @@
 // limitations under the License.
 //
 
-#ifndef KFETCH_TOOLKIT_COMMON_H_
-#define KFETCH_TOOLKIT_COMMON_H_
+#ifndef BOCHSPWN_COMMON_H_
+#define BOCHSPWN_COMMON_H_
 
-#include <stdint.h>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
-#include <set>
 #include <vector>
-#include <windows.h>
 
 #include "logging.pb.h"
 
 // ------------------------------------------------------------------
 // Constants.
 // ------------------------------------------------------------------
-const char kConfFileEnvVariable[] = "KFETCH_TOOLKIT_CONF";
+const char kConfFileEnvVariable[] = "BOCHSPWN_CONF";
 
 // ------------------------------------------------------------------
 // Internal enumerations and structures.
 // ------------------------------------------------------------------
-enum kfetch_mode {
-  BX_MODE_OFFLINE = 0,
-  BX_MODE_ONLINE_DOUBLEFETCH,
-  BX_MODE_RESERVED
-};
 
 // Generic settings read from .ini configuration file.
-struct kfetch_config {
-  // Path to output log file.
-  char *log_path;
+struct bochspwn_config {
+  // Path to the trace log output file.
+  char *trace_log_path;
 
-  // Handle to output file.
-  FILE *file_handle;
+  // Path to the modules output file.
+  char *modules_list_path;
 
-  // kfetch-toolkit execution mode.
-  kfetch_mode mode;
+  // Handle to the trace log output file.
+  FILE *trace_file;
+
+  // Handle to the modules output file.
+  FILE *modules_file;
 
   // Guest operating system name. Currently allowed: {"windows", "linux",
   // "freebsd"}
@@ -91,28 +87,24 @@ struct kfetch_config {
   char *symbol_path;
 
   // Initialize fields with typical values for safety.
-  kfetch_config() : log_path(strdup("memlog.txt")), file_handle(NULL), mode(BX_MODE_OFFLINE),
-                      system(strdup("windows")), os_version(strdup("win7_32")), bitness(32),
-                      min_read_size(1), max_read_size(16), min_write_size(1), max_write_size(16),
-                      write_as_text(0), symbolize(0), symbol_path(NULL) {}
+  bochspwn_config() : trace_log_path(strdup("memlog.bin")), modules_list_path(strdup("modules.bin")),
+                      trace_file(NULL), modules_file(NULL), system(strdup("windows")),
+                      os_version(strdup("win7_32")), bitness(32), min_read_size(1), max_read_size(16),
+                      min_write_size(1), max_write_size(16), callstack_length(64), write_as_text(0),
+                      symbolize(0), symbol_path(NULL) {}
 
-  ~kfetch_config() {
-    if (log_path != NULL) {
-      free(log_path);
-    }
-    if (system != NULL) {
-      free(system);
-    }
-    if (os_version != NULL) {
-      free(os_version);
-    }
+  ~bochspwn_config() {
+    free(trace_log_path);
+    free(modules_list_path);
+    free(system);
+    free(os_version);
+    free(symbol_path);
 
-    if (file_handle != NULL) {
-      fclose(file_handle);
+    if (trace_file != NULL) {
+      fclose(trace_file);
     }
-
-    if (symbol_path != NULL) {
-      free(symbol_path);
+    if (modules_file != NULL) {
+      fclose(modules_file);
     }
   }
 };
@@ -165,10 +157,6 @@ struct thread_info {
   // for a couple of user-memory-to-kernel-memory copying functions.
   uint64_t last_ret_addr;
 
-  // Only used for kfetch-toolkit mode != bx_mode_offline.
-  std::map<uint64_t, std::vector<log_data_st*> > memory_accesses;
-  std::vector<log_data_st *> access_structs;
-
   thread_info() : syscall_count(0), last_syscall_id(0) {}
 };
 
@@ -188,11 +176,10 @@ struct module_info {
 // ------------------------------------------------------------------
 // Global helper functions.
 // ------------------------------------------------------------------
-// Print out debug messages to stderr.
-int dbg_print(const char *fmt, ...);
 
-// Find kernel module descriptor.
-module_info* find_module(bx_address item);
+// Find kernel module descriptor by address or name.
+int find_module(bx_address item);
+int find_module_by_name(const std::string& module);
 
 // Print out log record as nicely formatted text.
 std::string LogDataAsText(const log_data_st& ld);
@@ -232,15 +219,11 @@ const char *translate_mem_access(log_data_st::mem_access_type type);
 namespace globals {
 
 // Generic configuration.
-extern kfetch_config config;
+extern bochspwn_config config;
 
 // Global information about all currently known kernel modules. Updated
 // lazily, only when an unknown driver is encountered.
 extern std::vector<module_info *> modules;
-
-// Same as "modules", but storing references to especially frequently
-// encountered modules.
-extern std::vector<module_info *> special_modules;
 
 // Thread descriptors including syscall stats / pending memory references.
 extern std::map<client_id, thread_info> thread_states;
@@ -253,14 +236,7 @@ extern bool last_ld_present;
 // before an instruction is executed.
 extern bool has_instr_before_execution_handler;
 
-namespace online {
-
-  // If known_callstack_item.find(address) != .end(), it means that the address
-  // has been already encountered as a part of a double-fetch stack trace.
-  extern std::set<bx_address> known_callstack_item;
-
-}  // namespace online
 }  // namespace globals
 
-#endif  // KFETCH_TOOLKIT_COMMON_H_
+#endif  // BOCHSPWN_COMMON_H_
 
