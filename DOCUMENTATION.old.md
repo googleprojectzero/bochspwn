@@ -119,7 +119,7 @@ This section contains a brief crash course on building and running instrumented 
 
 ### Dependencies
 
-We will be building a 32-bit PE executable using a 32-bit MinGW cross-compiler on Linux. For instrumentation projects where more than 2GB of memory is required to function correctly, it is similarly straightforward to build a 64-bit Bochs executable: just follow the steps below using `gcc-mingw-w64` instead of `gcc-mingw32` and `x86_64-w64-mingw32` instead of `i586-mingw32msvc`. Bochs is easiest to run on Windows, but to compile on Linux (otherwise, you are facing the perspective of setting up a specific unix-like environment on a Windows host, which can be a very frustrating experience). The only strict dependency of Bochspwn are [Protocol Buffers](https://github.com/google/protobuf) (protobufs) as provided by Google, with the optional addition of DbgHelp (either in the form of `dbghelp.lib` or `dbghelp.dll`). Since we are cross-compiling the Bochs project using a Linux host to build the application for a Windows target, we must obtain the MinGW GCC tool chain first:
+We will be building a 32-bit PE executable using a 32-bit MinGW cross-compiler on Linux. For instrumentation projects where more than 2GB of memory is required to function correctly, it is similarly straightforward to build a 64-bit Bochs executable: just follow the steps below using `gcc-mingw-w64` instead of `gcc-mingw32` and `x86_64-w64-mingw32` instead of `i586-mingw32msvc`. Bochs is easiest to run on Windows, but to compile on Linux (otherwise, you are facing the perspective of setting up a specific unix-like environment on a Windows host, which can be a very frustrating experience). The only strict dependency of Bochspwn are [Protocol Buffers](https://github.com/google/protobuf) (protobufs) as provided by Google, with the optional addition of DbgHelp (in the form of `DbgHelp.h` and either `dbghelp.lib` or `dbghelp.dll`). Since we are cross-compiling the Bochs project using a Linux host to build the application for a Windows target, we must obtain the MinGW GCC tool chain first:
 
 `$ sudo apt-get install gcc-mingw32`
 
@@ -173,7 +173,7 @@ $ protoc --version
 libprotoc 2.5.0
 ```
 
-If linking against the DbgHelp library, you must obtain the corresponding 32-bit or 64-bit `dbghelp.lib` or `dbghelp.dll` file on your own. It is not distributed with the Bochspwn project due to licensing restrictions.
+If compiling and linking against the DbgHelp library, you must obtain `DbgHelp.h` and the corresponding 32-bit or 64-bit `dbghelp.lib` or `dbghelp.dll` files on your own. It is not distributed with the Bochspwn project due to licensing restrictions.
 
 Now that we have the dependencies set up, let's proceed to building Bochs with Bochspwn included.
 
