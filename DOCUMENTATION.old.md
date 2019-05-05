@@ -183,7 +183,7 @@ First of all, you should download the latest Bochs source code archive from http
 
 As of 7/26/2013, the stable Bochs 2.6 release contains a bug which prevents Bochspwn from functioning correctly in some cases (it reports certain "read/write" memory events as "read"). You should either use a stable version cut from upstream after [r11750](https://sourceforge.net/p/bochs/code/11750/) or apply the [`bx_rw.patch`](https://j00ru.vexillium.org/dump/bx_rw.patch) patch directly to the source code.
 
-Now, unpack the contents of the `instrumentation` and `third_party/instrumentation` directories into `%BOCHS_PATH%/instrument/bochspwn` and configure Bochs. In the `LIBS` environment variable, choose `dbghelp.lib` for a 32-bit build and `dbghelp.dll` for a 64-bit build. Note that many of the compilation options can be potentially adjusted, but `--disable-all-optimizations` is required for the instrumentation to work correctly and should not be removed or modified under any circumstances, neither any new optimization-related options should be added.
+Now, unpack the contents of the `instrumentation` and `third_party/instrumentation` directories into `%BOCHS_PATH%/instrument/bochspwn` and configure Bochs. In the `LIBS` environment variable, choose `dbghelp.lib` or `dbghelp.dll` in the bitness corresponding to your Bochs build. Note that many of the compilation options can be potentially adjusted, but `--disable-all-optimizations` is required for the instrumentation to work correctly and should not be removed or modified under any circumstances, neither any new optimization-related options should be added.
 
 ```bash
 $ cd %BOCHS_PATH%
